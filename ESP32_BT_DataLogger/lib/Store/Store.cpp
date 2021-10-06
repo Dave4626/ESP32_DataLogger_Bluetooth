@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include "Store.h"
+#include "TempData.h"
 
 const uint16_t EEPROMSize = 512;
 
@@ -24,25 +25,25 @@ void Store::clearEEPROM()
     Serial.println("EEPROM cleared to 0");
 }
 
-uint32_t Store::getValueFromEEPROM(uint16_t index)
+TempData Store::getValueFromEEPROM(uint16_t index)
 {
     if (isInitialized == false)
         init();
 
     if (index > (EEPROMSize / 4))
     {
-        return 0;
+        return {0,0,0};
     }
 
     //index x 4bytes because each value has 4bytes
     uint32_t value = EEPROM.readUInt(index * 4);
-
     Serial.println("EEPROM value: " + String(value));
+    TempData t = FromUint32(value);
 
-    return value;
+    return t;
 }
 
-void Store::setValueToEEPROM(uint32_t value, uint16_t index)
+void Store::setValueToEEPROM(pTempData dataPtr, uint16_t index)
 {
     if (isInitialized == false)
         init();
@@ -53,6 +54,7 @@ void Store::setValueToEEPROM(uint32_t value, uint16_t index)
         return;
     }
 
+    uint32_t value = ToUint32(dataPtr);
     uint32_t currentValue = EEPROM.readUInt(index * 4);
     if (currentValue != value)
     {
@@ -63,7 +65,7 @@ void Store::setValueToEEPROM(uint32_t value, uint16_t index)
     Serial.println("Saved value to EEPROM: " + String(value) + " at index " + String(index));
 }
 
-void Store::setValueToEEPROM(uint32_t value)
+void Store::setValueToEEPROM(pTempData dataPtr)
 {
     if (isInitialized == false)
         init();
@@ -87,6 +89,8 @@ void Store::setValueToEEPROM(uint32_t value)
         return;
     }
 
+    uint32_t value = ToUint32(dataPtr);
+
     uint32_t currentValue = EEPROM.readUInt(index * 4);
     if (currentValue != value)
     {
@@ -94,7 +98,7 @@ void Store::setValueToEEPROM(uint32_t value)
         EEPROM.writeUInt(index * 4, value);
         EEPROM.commit();
     }
-    Serial.println("Saved value to EEPROM: " + String(value) + " at index " + String(index));
+    Serial.println("Saved value to EEPROM: " + GetTempDataAsString(dataPtr) + " at index " + String(index));
 }
 
 uint16_t Store::getMaximalIndex(){

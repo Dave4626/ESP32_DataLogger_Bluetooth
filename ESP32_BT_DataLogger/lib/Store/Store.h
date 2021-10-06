@@ -3,13 +3,14 @@
 
 #include <Arduino.h>
 #include <EEPROM.h>
+#include "TempData.h"
 
 class Store
 {
 public:
-    uint32_t getValueFromEEPROM(uint16_t index);
-    void setValueToEEPROM(uint32_t value, uint16_t index);
-    void setValueToEEPROM(uint32_t value);
+    TempData getValueFromEEPROM(uint16_t index);
+    void setValueToEEPROM(pTempData dataPtr, uint16_t index);
+    void setValueToEEPROM(pTempData dataPtr);
     void clearEEPROM();
     uint16_t getMaximalIndex();
 
