@@ -4,7 +4,6 @@
 
 //Define constants
 #define BUTTONPIN 0
-#define LEDPIN 4
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
@@ -34,7 +33,7 @@ bool debounce()
 void stateSwitch(bool state)
 {
   bluetoothSwitch = state;
-  digitalWrite(LEDPIN, state ? HIGH : LOW);
+  digitalWrite(LED_BUILTIN, state ? HIGH : LOW);
 }
 
 //interrupt handler
@@ -61,7 +60,7 @@ void setup()
   Serial.begin(9600);
   delay(1000);
   Serial.println("START");
-  pinMode(LEDPIN, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
   attachInterrupt(BUTTONPIN, buttonPressed, RISING);
 }
 
