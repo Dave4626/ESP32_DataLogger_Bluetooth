@@ -1,8 +1,10 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include "Store.h"
+#include "TempData.h"
 
 const uint16_t EEPROMSize = 512;
+const uint8_t blockSize = 8;
 
 void Store::init()
 {
@@ -24,46 +26,42 @@ void Store::clearEEPROM()
     Serial.println("EEPROM cleared to 0");
 }
 
-uint32_t Store::getValueFromEEPROM(uint16_t index)
+TempData Store::getValueFromEEPROM(uint16_t index)
 {
     if (isInitialized == false)
         init();
 
-    if (index > (EEPROMSize / 4))
+    if (index > (EEPROMSize / blockSize))
     {
-        return 0;
+        return {0, 0, 0};
     }
 
     //index x 4bytes because each value has 4bytes
-    uint32_t value = EEPROM.readUInt(index * 4);
+    TempData t = TempData();
+    EEPROM.readBytes(index * blockSize, &t, blockSize);
+    Serial.println("EEPROM read at index: " + String(index) + " has value: " + GetTempDataAsString(&t));
 
-    Serial.println("EEPROM value: " + String(value));
-
-    return value;
+    return t;
 }
 
-void Store::setValueToEEPROM(uint32_t value, uint16_t index)
+void Store::setValueToEEPROM(pTempData dataPtr, uint16_t index)
 {
     if (isInitialized == false)
         init();
-    
-    if (index > (EEPROMSize / 4))
+
+    if (index > (EEPROMSize / blockSize))
     {
         Serial.println("index is out of range");
         return;
     }
 
-    uint32_t currentValue = EEPROM.readUInt(index * 4);
-    if (currentValue != value)
-    {
-        //save only when different (save write cycles)
-        EEPROM.writeUInt(index * 4, value);
-        EEPROM.commit();
-    }
-    Serial.println("Saved value to EEPROM: " + String(value) + " at index " + String(index));
+    EEPROM.writeBytes(index * blockSize, dataPtr, blockSize);
+    EEPROM.commit();
+
+    Serial.println("Saved value to EEPROM: " + GetTempDataAsString(dataPtr) + " at index " + String(index));
 }
 
-void Store::setValueToEEPROM(uint32_t value)
+void Store::setValueToEEPROM(pTempData dataPtr)
 {
     if (isInitialized == false)
         init();
@@ -71,9 +69,22 @@ void Store::setValueToEEPROM(uint32_t value)
     //Get the last index
     uint16_t index = 0;
     bool foundIndex = false;
-    while (index < (EEPROMSize / 4)){
-        uint32_t someValue = EEPROM.readUInt(index * 4);
-        if (someValue == 0){
+    while (index < (EEPROMSize / blockSize))
+    {
+        byte bytes[blockSize];
+        EEPROM.readBytes(index * blockSize, &bytes, blockSize);
+        bool allZero = true;
+        for (size_t i = 0; i < blockSize; i++)
+        {
+            if (bytes[i] != 0)
+            {
+                allZero = false;
+                break;
+            }
+        }
+
+        if (allZero == true)
+        {
             //first empty value (at index) can be used for write
             foundIndex = true;
             break;
@@ -81,22 +92,16 @@ void Store::setValueToEEPROM(uint32_t value)
         index++;
     }
 
-    if (!foundIndex || index > (EEPROMSize / 4))
+    if (!foundIndex)
     {
-        Serial.println("EEPROM is full");
+        Serial.println("Canot find last empty index - EEPROM is full");
         return;
     }
 
-    uint32_t currentValue = EEPROM.readUInt(index * 4);
-    if (currentValue != value)
-    {
-        //save only when different (save write cycles)
-        EEPROM.writeUInt(index * 4, value);
-        EEPROM.commit();
-    }
-    Serial.println("Saved value to EEPROM: " + String(value) + " at index " + String(index));
+    setValueToEEPROM(dataPtr, index);
 }
 
-uint16_t Store::getMaximalIndex(){
-    return EEPROMSize / 4;
+uint16_t Store::getMaximalIndex()
+{
+    return EEPROMSize / blockSize;
 }
