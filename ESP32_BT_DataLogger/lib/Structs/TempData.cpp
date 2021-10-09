@@ -1,24 +1,24 @@
 #include <Arduino.h>
 #include "TempData.h"
+#include <RTClib.h>
 
 String GetTempDataAsString(pTempData data)
 {
+    DateTime d = DateTime(data->Time);
+    String date =
+        String(d.day()) + "." +
+        String(d.month()) + "." +
+        String(d.year()) + " " +
+        String(d.hour()) + ":" +
+        String(d.minute()) + ":" +
+        String(d.second());
+
     return "Temperature: " + String(data->Temperature) +
-           "C Humidity: " + String(data->Humidity) +
-           "% Hours from compile: " + String(data->HoursFromCompile);
+           "°C Humidity: " + String(data->Humidity) +
+           "% Date: " + String(date);
 }
 
-TempData FromUint32(uint32_t i)
-{
-    uint8_t temp = (uint8_t)(i >> 24);
-    uint8_t humi = (uint8_t)(i >> 16);
-    uint16_t hours = (uint16_t)(i & 0xFFFF);
-    TempData t = {Temperature : temp, Humidity : humi, HoursFromCompile : hours};
-
-    return t;
+bool IsEmpty(pTempData data){
+    return data->Temperature == 0 && data->Humidity == 0 && data->Time == 0;
 }
 
-uint32_t ToUint32(pTempData dataPtr)
-{
-    return (uint32_t)((dataPtr->Temperature << 24) | (dataPtr->Humidity << 16) | dataPtr->HoursFromCompile);
-}
