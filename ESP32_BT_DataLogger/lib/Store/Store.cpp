@@ -7,8 +7,22 @@ const int eepromAddress = 0x50;
 const uint16_t EEPROMSize = 4096;
 const uint8_t blockSize = 8;
 
+bool Store::isEEPROMReady(){
+    if (isInitialized == false)
+        init();
+    Wire.beginTransmission(eepromAddress);
+    return !Wire.endTransmission();
+}
+
 void Store::writeEEPROM(unsigned int eeaddress, byte data)
 {
+    if (isInitialized == false)
+        init();
+
+    while(!isEEPROMReady()){
+        delay(10);
+    }
+
     Wire.beginTransmission(eepromAddress);
     Wire.write((int)(eeaddress >> 8));   //writes the MSB
     Wire.write((int)(eeaddress & 0xFF)); //writes the LSB
@@ -20,6 +34,13 @@ void Store::writeEEPROM(unsigned int eeaddress, byte data)
 
 byte Store::readEEPROM(unsigned int eeaddress)
 {
+    if (isInitialized == false)
+        init();
+    
+    while(!isEEPROMReady()){
+        delay(10);
+    }
+
     byte rdata = 0xFF;
     Wire.beginTransmission(eepromAddress);
     Wire.write((int)(eeaddress >> 8));   //writes the MSB
