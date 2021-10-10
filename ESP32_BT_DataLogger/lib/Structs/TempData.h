@@ -10,6 +10,11 @@ typedef struct
     time_t Time;
 } TempData, *pTempData;
 
+typedef union {
+   TempData tempData; 
+   byte bytes[8];
+} TempDataUnion;
+
 String GetTempDataAsString(pTempData data);
 
 bool IsEmpty(pTempData);
