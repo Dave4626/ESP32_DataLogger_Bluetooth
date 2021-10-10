@@ -13,8 +13,8 @@ String GetTempDataAsString(pTempData data)
         String(d.minute()) + ":" +
         String(d.second());
 
-    return "Temperature: " + String(data->Temperature) +
-           "°C Humidity: " + String(data->Humidity) +
+    return "Temperature: " + String(data->Temperature / 10.0) +
+           "°C Humidity: " + String(data->Humidity / 10.0) +
            "% Date: " + String(date);
 }
 

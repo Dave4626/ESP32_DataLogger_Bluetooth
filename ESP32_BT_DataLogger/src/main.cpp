@@ -4,12 +4,14 @@
 #include "TempData.h"
 #include <Wire.h>
 #include <RTClib.h>
+#include "DHT.h"
 
 //Define constants
 // the pin that is connected to SQW
 #define CLOCK_INTERRUPT_PIN 2
 #define BUTTONPIN 0
 #define MYLEDPIN 13
+#define DHT11PIN 4
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
@@ -18,9 +20,12 @@
 //Global variables
 volatile bool bluetoothSwitch = false;
 static unsigned long last_interrupt_time = 0;
+float tempDHT = 0;
+float humiDHT = 0;
 BluetoothSerial SerialBT;
 Store EEPROMStore;
 RTC_DS3231 rtc;
+DHT dht(DHT11PIN, DHT11);
 
 //debounce for button interrupt
 bool debounce()
@@ -41,6 +46,7 @@ void stateSwitch(bool state)
 {
   bluetoothSwitch = state;
   digitalWrite(MYLEDPIN, state ? HIGH : LOW);
+  digitalWrite(LED_BUILTIN, state ? HIGH : LOW);
 }
 
 //interrupt handler
@@ -72,7 +78,11 @@ void setup()
   Serial.begin(9600);
   delay(1000);
   Serial.println("START");
+  dht.begin();
   pinMode(MYLEDPIN, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(MYLEDPIN, LOW);
+  digitalWrite(LED_BUILTIN, LOW);
   attachInterrupt(BUTTONPIN, buttonPressed, RISING);
 
   //RTC
@@ -114,6 +124,26 @@ void setup()
   }
 }
 
+// read data from DHT (temp a humi)
+bool readDHT()
+{
+  tempDHT = 0;
+  humiDHT = 0;
+  float temp = dht.readTemperature();
+  float humi = dht.readHumidity();
+  if (isnan(temp) || isnan(humi))
+  {
+    return false;
+  }
+  else
+  {
+    tempDHT = temp;
+    humiDHT = humi;
+    Serial.println("DHT: " + String(temp) + "C " + String(humi) + "%");
+    return true;
+  }
+}
+
 //Program running when bluetooth flag is off
 void programWhenBTOff()
 {
@@ -133,9 +163,13 @@ void programWhenBTOff()
   if (rtc.alarmFired(1))
   {
     time_t time = rtc.now().unixtime();
-    uint16_t temp = random(1, 30);
-    uint16_t humi = random(10, 100);
-    Serial.println("Data pro sensor: " + String(temp) + "C, " + String(humi) + "%");
+    while (!readDHT())
+    {
+      delay(10);
+    }
+    uint16_t temp = (uint16_t)(tempDHT * 10);
+    uint16_t humi = (uint16_t)(humiDHT * 10);
+    Serial.println("Data for sensor: " + String(temp / 10.0) + "C, " + String(humi / 10.0) + "%");
     TempData t = {Temperature : temp, Humidity : humi, Time : time};
     EEPROMStore.setValueToEEPROM(&t);
 
