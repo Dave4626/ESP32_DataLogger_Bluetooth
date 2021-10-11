@@ -1,11 +1,13 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "Store.h"
-#include "TempData.h"
+#include "LoggerData.h"
 
 const int eepromAddress = 0x50;
 const uint16_t EEPROMSize = 4096;
 const uint8_t blockSize = 8;
+//configuration takes 1 block (at last index)
+const uint8_t configBlocksCount = 1;
 
 bool Store::isEEPROMReady(){
     if (isInitialized == false)
@@ -14,6 +16,7 @@ bool Store::isEEPROMReady(){
     return !Wire.endTransmission();
 }
 
+//Write 1byte at specified address
 void Store::writeEEPROM(unsigned int eeaddress, byte data)
 {
     if (isInitialized == false)
@@ -32,6 +35,7 @@ void Store::writeEEPROM(unsigned int eeaddress, byte data)
     }
 }
 
+//Read 1byte at specified address
 byte Store::readEEPROM(unsigned int eeaddress)
 {
     if (isInitialized == false)
@@ -60,6 +64,7 @@ byte Store::readEEPROM(unsigned int eeaddress)
     }
 }
 
+//Init EEPROM
 void Store::init()
 {
     if (!Wire.begin())
@@ -73,61 +78,65 @@ void Store::init()
     }
 }
 
+//Clear all data, (not configuration)
 void Store::clearEEPROM()
 {
     if (isInitialized == false)
         init();
 
-    for (size_t i = 0; i < EEPROMSize; i++)
+    //clear data (not configuration)
+    for (size_t i = 0; i < EEPROMSize - (blockSize * configBlocksCount); i++)
     {
         writeEEPROM(i, (byte)0);
     }
     Serial.println("EEPROM cleared to 0");
 }
 
-TempData Store::getValueFromEEPROM(uint16_t index)
+//Get value at specified index
+LoggerData Store::getValueFromEEPROM(uint16_t index)
 {
     if (isInitialized == false)
         init();
 
-    if (index > (EEPROMSize / blockSize))
+    if (index + configBlocksCount > (EEPROMSize / blockSize))
     {
         return {0, 0, 0};
     }
 
-    //index x 4bytes because each value has 4bytes
-    TempDataUnion *tu = new TempDataUnion();
+    LoggerDataUnion *tu = new LoggerDataUnion();
     for (size_t i = 0; i < blockSize; i++)
     {
         tu->bytes[i] = readEEPROM((index * blockSize) + i);
     }
-    //Serial.println("EEPROM read at index: " + String(index) + " has value: " + GetTempDataAsString(&(tu->tempData)));
+    //Serial.println("EEPROM read at index: " + String(index) + " has value: " + GetLoggerDataAsString(&(tu->loggerData)));
 
-    return tu->tempData;
+    return tu->loggerData;
 }
 
-void Store::setValueToEEPROM(pTempData dataPtr, uint16_t index)
+//Set value at specified index
+void Store::setValueToEEPROM(pLoggerData dataPtr, uint16_t index)
 {
     if (isInitialized == false)
         init();
 
-    if (index > (EEPROMSize / blockSize))
+    if (index > ((EEPROMSize - (blockSize * configBlocksCount)) / blockSize))
     {
         Serial.println("index is out of range");
         return;
     }
 
-    TempDataUnion tu;
-    tu.tempData = *dataPtr;
+    LoggerDataUnion tu;
+    tu.loggerData = *dataPtr;
     for (size_t i = 0; i < blockSize; i++)
     {
         writeEEPROM(index * blockSize + i, tu.bytes[i]);
     }
 
-    Serial.println("Saved value to EEPROM: " + GetTempDataAsString(dataPtr) + " at index " + String(index));
+    Serial.println("Saved value to EEPROM: " + GetLoggerDataAsString(dataPtr) + " at index " + String(index));
 }
 
-void Store::setValueToEEPROM(pTempData dataPtr)
+//Set value at lest empty index
+bool Store::setValueToEEPROM(pLoggerData dataPtr)
 {
     if (isInitialized == false)
         init();
@@ -135,7 +144,7 @@ void Store::setValueToEEPROM(pTempData dataPtr)
     //Get the last index
     uint16_t index = 0;
     bool foundIndex = false;
-    while (index < (EEPROMSize / blockSize))
+    while (index < ((EEPROMSize - (blockSize * configBlocksCount)) / blockSize))
     {
         byte bytes[blockSize];
         for (size_t i = 0; i < blockSize; i++)
@@ -165,13 +174,44 @@ void Store::setValueToEEPROM(pTempData dataPtr)
     if (!foundIndex)
     {
         Serial.println("Canot find last empty index - EEPROM is full");
-        return;
+        return false;
     }
 
     setValueToEEPROM(dataPtr, index);
+    return true;
 }
 
+//Get maximal index
 uint16_t Store::getMaximalIndex()
 {
-    return EEPROMSize / blockSize;
+    return (EEPROMSize - (blockSize * configBlocksCount)) / blockSize;
+}
+
+//Get config
+LoggerConfig Store::getConfig(){
+    uint32_t configIndex = EEPROMSize - (configBlocksCount * blockSize);
+
+    LoggerConfigUnion *cu = new LoggerConfigUnion();
+    for (size_t i = 0; i < (configBlocksCount * blockSize); i++)
+    {
+        cu->bytes[i] = readEEPROM(configIndex + i);
+    }
+
+    Serial.println("EEPROM read at index: " + String(configIndex));
+
+    return cu->loggerConfig;
+}
+
+//Save config
+void Store::setLoggerConfig(pLoggerConfig configPtr){
+    uint32_t configIndex = EEPROMSize - (configBlocksCount * blockSize);
+
+    LoggerConfigUnion cu;
+    cu.loggerConfig = *configPtr;
+    for (size_t i = 0; i < (configBlocksCount * blockSize); i++)
+    {
+        writeEEPROM(configIndex + i, cu.bytes[i]);
+    }
+
+    Serial.println("Saved value to EEPROM: " + String(configPtr->period) + " at index " + String(configIndex));
 }
