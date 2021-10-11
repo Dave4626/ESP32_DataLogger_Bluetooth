@@ -1,7 +1,8 @@
 #include <Arduino.h>
 #include "BluetoothSerial.h"
 #include "Store.h"
-#include "TempData.h"
+#include "LoggerData.h"
+#include "LoggerConfig.h"
 #include <Wire.h>
 #include <RTClib.h>
 #include "DHT.h"
@@ -66,9 +67,27 @@ void buttonPressed()
   }
 }
 
+//on rtc alarm
 void onAlarm()
 {
   Serial.println("Alarm occured!");
+}
+
+//Set next alarm after period from configuration
+void setNextAlarm()
+{
+  rtc.clearAlarm(1);
+  Serial.println("Alarm cleared");
+  LoggerConfig config = EEPROMStore.getConfig();
+  uint32_t period = config.period > 0 ? config.period : 1;
+
+  while (!rtc.setAlarm1(rtc.now() + TimeSpan(period * 60), DS3231_A1_Hour))
+  {
+    Serial.println("Error, alarm wasn't set!");
+    delay(500);
+  }
+
+  Serial.println("Alarm will happen in " + String(period * 60) + " seconds!");
 }
 
 //Setup
@@ -113,15 +132,8 @@ void setup()
   // turn off alarm 2 (in case it isn't off already)
   // again, this isn't done at reboot, so a previously set alarm could easily go overlooked
   rtc.disableAlarm(2);
-  // schedule an alarm 10 seconds in the future
-  if (!rtc.setAlarm1(rtc.now() + TimeSpan(0, 0, 1, 0), DS3231_A1_Hour))
-  {
-    Serial.println("Error, alarm wasn't set!");
-  }
-  else
-  {
-    Serial.println("Alarm will happen in 60 seconds!");
-  }
+  // schedule an alarm
+  setNextAlarm();
 }
 
 // read data from DHT (temp a humi)
@@ -170,19 +182,9 @@ void programWhenBTOff()
     uint16_t temp = (uint16_t)(tempDHT * 10);
     uint16_t humi = (uint16_t)(humiDHT * 10);
     Serial.println("Data for sensor: " + String(temp / 10.0) + "C, " + String(humi / 10.0) + "%");
-    TempData t = {Temperature : temp, Humidity : humi, Time : time};
+    LoggerData t = {Temperature : temp, Humidity : humi, Time : time};
     EEPROMStore.setValueToEEPROM(&t);
-
-    rtc.clearAlarm(1);
-    Serial.println("Alarm cleared");
-
-    while (!rtc.setAlarm1(rtc.now() + TimeSpan(0, 0, 1, 0), DS3231_A1_Hour))
-    {
-      Serial.println("Error, alarm wasn't set!");
-      delay(500);
-    }
-
-    Serial.println("Alarm will happen in 60 seconds!");
+    setNextAlarm();
   }
   delay(2000);
 }
@@ -199,7 +201,12 @@ void programWhenBTOn()
     //Send welcome message to connected device
     if (!sentMessage && SerialBT.connected())
     {
-      SerialBT.println("Welcome! Send \"start\" to start reading or \"clear\" to clear memory or \"end\" to disconnect");
+      SerialBT.println("ESP32 DATALOGGER BT");
+      SerialBT.println("List of commands:");
+      SerialBT.println("\"read\" to start reading");
+      SerialBT.println("\"period:xxx\" where xxx is time [minutes] to setup logging period");
+      SerialBT.println("\"clear\" to clear memory or \"end\" to disconnect");
+      SerialBT.println("\"end\" to disconnect and continue in logging");
       sentMessage = true;
     }
 
@@ -209,31 +216,52 @@ void programWhenBTOn()
       String s = SerialBT.readString();
       Serial.println("Received BT message: " + s);
 
-      if (s.startsWith("start"))
+      if (s.startsWith("read")) //READ
       {
-        SerialBT.println("Start working... :-)");
+        SerialBT.println("INFO: Start reading data:");
         for (size_t i = 0; i < EEPROMStore.getMaximalIndex(); i++)
         {
-          TempData value = EEPROMStore.getValueFromEEPROM(i);
+          LoggerData value = EEPROMStore.getValueFromEEPROM(i);
           if (IsEmpty(&value))
             break;
-          SerialBT.println("Index " + String(i) + "= " + GetTempDataAsString(&value));
+          SerialBT.println("Index;" + String(i) + ";" + GetLoggerDataAsString(&value));
         }
+        SerialBT.println("INFO: End of reading data.");
+        sentMessage = false;
       }
-      else if (s.startsWith("clear"))
+      else if (s.startsWith("period")) //SETUP PERIOD
       {
+        String periodMinutesString = s.substring(7);
+        uint32_t periodMinutes = strtoul(periodMinutesString.c_str(), NULL, 10);
+        if (periodMinutes > 0)
+        {
+          LoggerConfig conf = {period : periodMinutes, _reserved : 0};
+          EEPROMStore.setLoggerConfig(&conf);
+          SerialBT.println("INFO: Configuration saved. Will be used for next loop or after reboot.");
+        }
+        else
+        {
+          SerialBT.println("ERROR: Not valid value.");
+        }
+        sentMessage = false;
+      }
+      else if (s.startsWith("clear")) //CLEAR
+      {
+        SerialBT.println("INFO: Memory will be cleared. Plase wait (it can take some minute)...");
         EEPROMStore.clearEEPROM();
-        SerialBT.println("Memory is cleared.");
+        SerialBT.println("INFO: Memory is cleared.");
+        sentMessage = false;
       }
-      else if (s.startsWith("end"))
+      else if (s.startsWith("end")) //END
       {
-        SerialBT.println("Goodbye... :-)");
+        SerialBT.println("Program will continue in logging. Goodbye.");
         stateSwitch(false);
         break;
       }
       else
       {
         //unexpected message - resend welcome message
+        SerialBT.println("ERROR: Unexpected message.");
         sentMessage = false;
       }
     }
