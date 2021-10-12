@@ -9,7 +9,7 @@
 
 //Define constants
 // the pin that is connected to SQW
-#define BUTTONPIN 0
+#define BUTTONPIN GPIO_NUM_13
 #define DHT11PIN 4
 #define CLOCK_INTERRUPT_PIN 33
 #define WAKE_PIN_BITMASK 0x200000000 //GPIO 33 (2^33 = 8589934592 = 0x200000000) (RTC SQW)
@@ -20,6 +20,8 @@
 
 //Global variables
 volatile bool bluetoothSwitch = false;
+volatile bool logData = false;
+static unsigned long last_interrupt_time = 0;
 float tempDHT = 0;
 float humiDHT = 0;
 BluetoothSerial SerialBT;
@@ -42,18 +44,22 @@ void printWakeupReasonAndSetState()
 
   //set default state (logger mode)
   stateSwitch(false);
+  //set default log state
+  logData = false;
 
   switch (wakeup_reason)
   {
   case ESP_SLEEP_WAKEUP_EXT0:
-    Serial.println("Wakeup caused by external signal using RTC_IO");
     //wake up from button
+    Serial.println("Wakeup caused by external signal using RTC_IO");
     //Set BT state (BT Mode)
     stateSwitch(true);
     break;
   case ESP_SLEEP_WAKEUP_EXT1:
-    Serial.println("Wakeup caused by external signal using RTC_CNTL");
     //wake up from RTC
+    Serial.println("Wakeup caused by external signal using RTC_CNTL");
+    //set log data flag to true (will log data)
+    logData = true;
     break;
   case ESP_SLEEP_WAKEUP_TIMER:
     Serial.println("Wakeup caused by timer");
@@ -71,35 +77,36 @@ void printWakeupReasonAndSetState()
   }
 }
 
-//debounce for button interrupt
-// bool debounce()
-// {
-//   bool result = false;
-//   unsigned long interrupt_time = millis();
-//   if (interrupt_time - last_interrupt_time > 200)
-//   {
-//     result = true;
-//   }
-//   last_interrupt_time = interrupt_time;
-//   return result;
-// }
+//debounce for button interrupt (only when in BT mode to EXIT from it)
+bool debounce()
+{
+  bool result = false;
+  unsigned long interrupt_time = millis();
+  if (interrupt_time - last_interrupt_time > 200)
+  {
+    result = true;
+  }
+  last_interrupt_time = interrupt_time;
+  return result;
+}
 
-//interrupt handler
-// void buttonPressed()
-// {
-//   if (debounce())
-//   {
-//     Serial.println("BUTTON PRESSED");
-//     if (bluetoothSwitch == true)
-//     {
-//       stateSwitch(false);
-//     }
-//     else
-//     {
-//       stateSwitch(true);
-//     }
-//   }
-// }
+//interrupt handler (only when in BT mode to EXIT from it)
+void buttonPressed()
+{
+  if (debounce())
+  {
+    Serial.println("BUTTON PRESSED");
+    detachInterrupt(BUTTONPIN);
+    if (bluetoothSwitch == true)
+    {
+      stateSwitch(false);
+    }
+    else
+    {
+      stateSwitch(true);
+    }
+  }
+}
 
 //on rtc alarm
 // void onAlarm()
@@ -113,15 +120,28 @@ void setNextAlarm()
   rtc.clearAlarm(1);
   Serial.println("Alarm cleared");
   LoggerConfig config = EEPROMStore.getConfig();
-  uint32_t period = config.period > 0 ? config.period : 1;
+  //get period or default 60sec
+  uint32_t periodSec = config.periodMinutes > 0 ? config.periodMinutes * 60 : 60;
 
-  while (!rtc.setAlarm1(rtc.now() + TimeSpan(period * 60), DS3231_A1_Hour))
+  //find next alarm time
+  //first create copy of now with alarmStart hour and minute
+  DateTime dt = DateTime(rtc.now().year(), rtc.now().month(), rtc.now().day(), config.startHour, config.startMinute, 0);
+  DateTime current = rtc.now();
+  //then go back to past
+  dt = dt - TimeSpan(1, 0, 0, 0);
+  //now add period until alarm will be in future
+  while (dt < current)
+  {
+    dt = dt + TimeSpan(periodSec);
+  }
+
+  while (!rtc.setAlarm1(dt, DS3231_A1_Hour))
   {
     Serial.println("Error, alarm wasn't set!");
     delay(500);
   }
 
-  Serial.println("Alarm will happen in " + String(period * 60) + " seconds!");
+  Serial.println("Alarm will happen at " + dt.timestamp());
 }
 
 //setup RTC and set next alarm
@@ -162,14 +182,15 @@ void setupRtc()
 //Setup
 void setup()
 {
-  pinMode(LED_BUILTIN, OUTPUT);
+  //Serial begin
   Serial.begin(9600);
-  delay(1000);
-  Serial.println("START");
-  dht.begin();
+  delay(2000);
 
-  //set default state
-  stateSwitch(false);
+  Serial.println("START");
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  //DHT init
+  dht.begin();
 
   //Print the wakeup reason for ESP32 and set state
   printWakeupReasonAndSetState();
@@ -179,9 +200,13 @@ void setup()
 
   //setup wake up pins
   esp_sleep_enable_ext1_wakeup(WAKE_PIN_BITMASK, ESP_EXT1_WAKEUP_ALL_LOW);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+  esp_sleep_enable_ext0_wakeup(BUTTONPIN, 1);
 
   //other is now up to loop method
+  if (bluetoothSwitch == true)
+  {
+    attachInterrupt(BUTTONPIN, buttonPressed, RISING);
+  }
 }
 
 // read data from DHT (temp a humi)
@@ -205,7 +230,8 @@ bool readDHT()
 }
 
 //Turn light off and go to sleep
-void goToSleep(){
+void goToSleep()
+{
   Serial.println("Going to sleep now");
   digitalWrite(LED_BUILTIN, LOW);
   delay(500);
@@ -215,16 +241,26 @@ void goToSleep(){
 //Program running when bluetooth flag is off
 void programWhenBTOff()
 {
-  time_t time = rtc.now().unixtime();
-  while (!readDHT())
+  //log data ony if woke up by RTC alarm
+  if (logData)
   {
-    delay(10);
+    //read and log data
+    time_t time = rtc.now().unixtime();
+    while (!readDHT())
+    {
+      delay(10);
+    }
+    uint16_t temp = (uint16_t)(tempDHT * 10);
+    uint16_t humi = (uint16_t)(humiDHT * 10);
+    Serial.println("Data for sensor: " + String(temp / 10.0) + "C, " + String(humi / 10.0) + "%");
+    LoggerData t = {Temperature : temp, Humidity : humi, Time : time};
+    EEPROMStore.setValueToEEPROM(&t);
   }
-  uint16_t temp = (uint16_t)(tempDHT * 10);
-  uint16_t humi = (uint16_t)(humiDHT * 10);
-  Serial.println("Data for sensor: " + String(temp / 10.0) + "C, " + String(humi / 10.0) + "%");
-  LoggerData t = {Temperature : temp, Humidity : humi, Time : time};
-  EEPROMStore.setValueToEEPROM(&t);
+  else
+  {
+    Serial.println("Woke up, but not by RTC (no logging)");
+  }
+  //Set alarm and go to sleep
   setNextAlarm();
   delay(100);
   goToSleep();
@@ -243,11 +279,7 @@ void programWhenBTOn()
     if (!sentMessage && SerialBT.connected())
     {
       SerialBT.println("ESP32 DATALOGGER BT");
-      SerialBT.println("List of commands:");
-      SerialBT.println("\"read\" to start reading");
-      SerialBT.println("\"period:xxx\" where xxx is time [minutes] to setup logging period");
-      SerialBT.println("\"clear\" to clear memory or \"end\" to disconnect");
-      SerialBT.println("\"end\" to disconnect and continue in logging");
+      SerialBT.println("List of commands: \"help\", \"read\", \"config:HH:MM:period\", \"time:yyyy-MM-DDTHH:mm:ss\", \"clear\", \"end\"");
       sentMessage = true;
     }
 
@@ -268,30 +300,68 @@ void programWhenBTOn()
           SerialBT.println("Index;" + String(i) + ";" + GetLoggerDataAsString(&value));
         }
         SerialBT.println("INFO: End of reading data.");
-        sentMessage = false;
+        //sentMessage = false;
       }
-      else if (s.startsWith("period")) //SETUP PERIOD
+      else if (s.startsWith("config")) //SETUP PERIOD
       {
-        String periodMinutesString = s.substring(7);
-        uint32_t periodMinutes = strtoul(periodMinutesString.c_str(), NULL, 10);
-        if (periodMinutes > 0)
+        Serial.println("received: " + s);
+        //expect "config:12:15:360"
+        char buf[s.length() - 7];              //len - "config:"
+        s.toCharArray(buf, s.length() - 7, 7); //copy to arr part "12:15:360"
+        //split
+        uint8_t i = 0;
+        String split[3];
+        const char *splitChar = ":";
+        String temp;
+        for (temp = strtok(buf, splitChar); temp; temp = strtok(NULL, splitChar))
         {
-          LoggerConfig conf = {period : periodMinutes, _reserved : 0};
+          split[i] = String(temp);
+          i++;
+        }
+        //convert strings to integers
+        uint8_t hh = (uint8_t)strtol(split[0].c_str(), NULL, 10);
+        uint8_t mm = (uint8_t)strtol(split[1].c_str(), NULL, 10);
+        uint16_t periodMin = (uint8_t)strtol(split[2].c_str(), NULL, 10);
+        //check and save
+        if (i == 3 && periodMin > 0)
+        {
+          LoggerConfig conf = {startHour : hh, startMinute : mm, periodMinutes : periodMin, _reserved : 0};
           EEPROMStore.setLoggerConfig(&conf);
-          SerialBT.println("INFO: Configuration saved. Will be used for next loop or after reboot.");
+          SerialBT.println("INFO: Configuration saved.");
         }
         else
         {
           SerialBT.println("ERROR: Not valid value.");
         }
-        sentMessage = false;
+        //sentMessage = false;
       }
       else if (s.startsWith("clear")) //CLEAR
       {
         SerialBT.println("INFO: Memory will be cleared. Plase wait (it can take some minute)...");
         EEPROMStore.clearEEPROM();
         SerialBT.println("INFO: Memory is cleared.");
-        sentMessage = false;
+        //sentMessage = false;
+      }
+      else if (s.startsWith("time")) //ADJUST TIME
+      {
+        SerialBT.println("INFO: Set time start...");
+        //expected time:yyyy-MM-DDTHH:mm:ss
+        String timeIsoStr = s.substring(5);
+        rtc.adjust(DateTime(timeIsoStr.c_str()));
+        SerialBT.println("INFO: Time is adjusted now to: " + rtc.now().timestamp());
+        //sentMessage = false;
+      }
+      else if (s.startsWith("help")) //HELP
+      {
+        SerialBT.println("List of commands: \"help\", \"read\", \"config:HH:MM:period\", \"time:yyyy-MM-DDTHH:mm:ss\", \"clear\", \"end\"");
+        SerialBT.println("\"help\" to see this :-)");
+        SerialBT.println("\"read\" to start reading");
+        SerialBT.println("\"config:HH:MM:period\" where HH and MM is reference hour and minute, period is logging period [minutes]");
+        SerialBT.println("(note config:12-15-360 means meassure each 6hours at: 12:15, 18:15, 00:15, 06:15, 12:15 etc)");
+        SerialBT.println("\"clear\" to clear memory or \"end\" to disconnect");
+        SerialBT.println("\"time:yyyy-MM-DDTHH:mm:ss\" to set time");
+        SerialBT.println("\"end\" to disconnect and continue in logging");
+        SerialBT.println("RTC Time is " + rtc.now().timestamp());
       }
       else if (s.startsWith("end")) //END
       {
@@ -309,10 +379,14 @@ void programWhenBTOn()
     delay(20);
   }
 
+  //BT off and Switch state
   delay(500);
   SerialBT.end();
-
   stateSwitch(false);
+  //Set alarm and go to sleep
+  setNextAlarm();
+  delay(100);
+  goToSleep();
 }
 
 //Loop

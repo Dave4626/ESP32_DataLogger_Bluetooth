@@ -5,7 +5,9 @@
 
 typedef struct
 {
-    uint32_t period;
+    uint8_t startHour;
+    uint8_t startMinute;
+    uint16_t periodMinutes;
     uint32_t _reserved;
 } LoggerConfig, *pLoggerConfig;
 
