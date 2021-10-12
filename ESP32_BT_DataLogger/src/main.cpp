@@ -128,12 +128,7 @@ void setNextAlarm()
   DateTime dt = DateTime(rtc.now().year(), rtc.now().month(), rtc.now().day(), config.startHour, config.startMinute, 0);
   DateTime current = rtc.now();
   //then go back to past
-  while (dt >= current)
-  {
-    dt = dt - TimeSpan(periodSec);
-  }
-  //for sure one more period back
-  dt = dt - TimeSpan(periodSec);
+  dt = dt - TimeSpan(1, 0, 0, 0);
   //now add period until alarm will be in future
   while (dt < current)
   {
