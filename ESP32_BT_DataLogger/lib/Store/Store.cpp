@@ -1,69 +1,142 @@
 #include <Arduino.h>
-#include <EEPROM.h>
+#include <Wire.h>
 #include "Store.h"
+#include "LoggerData.h"
 
-const uint16_t EEPROMSize = 512;
+const int eepromAddress = 0x50;
+const uint16_t EEPROMSize = 4096;
+const uint8_t blockSize = 8;
+//configuration takes 1 block (at last index)
+const uint8_t configBlocksCount = 1;
 
-void Store::init()
-{
-    EEPROM.begin(EEPROMSize);
-    isInitialized = true;
-    Serial.println("EEPROM is initialized");
+bool Store::isEEPROMReady(){
+    if (isInitialized == false)
+        init();
+    Wire.beginTransmission(eepromAddress);
+    return !Wire.endTransmission();
 }
 
+//Write 1byte at specified address
+void Store::writeEEPROM(unsigned int eeaddress, byte data)
+{
+    if (isInitialized == false)
+        init();
+
+    while(!isEEPROMReady()){
+        delay(10);
+    }
+
+    Wire.beginTransmission(eepromAddress);
+    Wire.write((int)(eeaddress >> 8));   //writes the MSB
+    Wire.write((int)(eeaddress & 0xFF)); //writes the LSB
+    Wire.write(data);
+    if (Wire.endTransmission() != I2C_ERROR_OK){
+        Serial.println("Byte NOT written to EEPROM");
+    }
+}
+
+//Read 1byte at specified address
+byte Store::readEEPROM(unsigned int eeaddress)
+{
+    if (isInitialized == false)
+        init();
+    
+    while(!isEEPROMReady()){
+        delay(10);
+    }
+
+    byte rdata = 0xFF;
+    Wire.beginTransmission(eepromAddress);
+    Wire.write((int)(eeaddress >> 8));   //writes the MSB
+    Wire.write((int)(eeaddress & 0xFF)); //writes the LSB
+    if (Wire.endTransmission() != I2C_ERROR_OK){
+        Serial.println("Read from EEPROM Error (1st)");
+    }
+    Wire.requestFrom(eepromAddress, 1);
+
+    if (Wire.available()){
+        rdata = Wire.read();
+        return rdata;
+    }
+    else{
+        Serial.println("EEPROM read error (2nd)");
+        return (byte)0x00;
+    }
+}
+
+//Init EEPROM
+void Store::init()
+{
+    if (!Wire.begin())
+    {
+        Serial.println("EEPROM is NOT initialized");
+    }
+    else
+    {
+        isInitialized = true;
+        Serial.println("EEPROM is initialized");
+    }
+}
+
+//Clear all data, (not configuration)
 void Store::clearEEPROM()
 {
     if (isInitialized == false)
         init();
 
-    for (size_t i = 0; i < EEPROMSize; i++)
+    //clear data (not configuration)
+    for (size_t i = 0; i < EEPROMSize - (blockSize * configBlocksCount); i++)
     {
-        EEPROM.writeByte(i, 0);
+        writeEEPROM(i, (byte)0);
     }
-    EEPROM.commit();
     Serial.println("EEPROM cleared to 0");
 }
 
-uint32_t Store::getValueFromEEPROM(uint16_t index)
+//Get value at specified index
+LoggerData Store::getValueFromEEPROM(uint16_t index)
 {
     if (isInitialized == false)
         init();
 
-    if (index > (EEPROMSize / 4))
+    if (index + configBlocksCount > (EEPROMSize / blockSize))
     {
-        return 0;
+        return {0, 0, 0};
     }
 
-    //index x 4bytes because each value has 4bytes
-    uint32_t value = EEPROM.readUInt(index * 4);
+    LoggerDataUnion *tu = new LoggerDataUnion();
+    for (size_t i = 0; i < blockSize; i++)
+    {
+        tu->bytes[i] = readEEPROM((index * blockSize) + i);
+    }
+    //Serial.println("EEPROM read at index: " + String(index) + " has value: " + GetLoggerDataAsString(&(tu->loggerData)));
 
-    Serial.println("EEPROM value: " + String(value));
-
-    return value;
+    return tu->loggerData;
 }
 
-void Store::setValueToEEPROM(uint32_t value, uint16_t index)
+//Set value at specified index
+void Store::setValueToEEPROM(pLoggerData dataPtr, uint16_t index)
 {
     if (isInitialized == false)
         init();
-    
-    if (index > (EEPROMSize / 4))
+
+    if (index > ((EEPROMSize - (blockSize * configBlocksCount)) / blockSize))
     {
         Serial.println("index is out of range");
         return;
     }
 
-    uint32_t currentValue = EEPROM.readUInt(index * 4);
-    if (currentValue != value)
+    LoggerDataUnion tu;
+    tu.loggerData = *dataPtr;
+    for (size_t i = 0; i < blockSize; i++)
     {
-        //save only when different (save write cycles)
-        EEPROM.writeUInt(index * 4, value);
-        EEPROM.commit();
+        writeEEPROM(index * blockSize + i, tu.bytes[i]);
     }
-    Serial.println("Saved value to EEPROM: " + String(value) + " at index " + String(index));
+
+    Serial.println("Saved value to EEPROM: " + GetLoggerDataAsString(dataPtr) + " at index " + String(index));
 }
 
-void Store::setValueToEEPROM(uint32_t value)
+//Set value at lest empty index
+bool Store::setValueToEEPROM(pLoggerData dataPtr)
 {
     if (isInitialized == false)
         init();
@@ -71,9 +144,26 @@ void Store::setValueToEEPROM(uint32_t value)
     //Get the last index
     uint16_t index = 0;
     bool foundIndex = false;
-    while (index < (EEPROMSize / 4)){
-        uint32_t someValue = EEPROM.readUInt(index * 4);
-        if (someValue == 0){
+    while (index < ((EEPROMSize - (blockSize * configBlocksCount)) / blockSize))
+    {
+        byte bytes[blockSize];
+        for (size_t i = 0; i < blockSize; i++)
+        {
+            bytes[i] = readEEPROM((index * blockSize) + i);
+        }
+        
+        bool allZero = true;
+        for (size_t i = 0; i < blockSize; i++)
+        {
+            if (bytes[i] != 0)
+            {
+                allZero = false;
+                break;
+            }
+        }
+
+        if (allZero == true)
+        {
             //first empty value (at index) can be used for write
             foundIndex = true;
             break;
@@ -81,22 +171,47 @@ void Store::setValueToEEPROM(uint32_t value)
         index++;
     }
 
-    if (!foundIndex || index > (EEPROMSize / 4))
+    if (!foundIndex)
     {
-        Serial.println("EEPROM is full");
-        return;
+        Serial.println("Canot find last empty index - EEPROM is full");
+        return false;
     }
 
-    uint32_t currentValue = EEPROM.readUInt(index * 4);
-    if (currentValue != value)
-    {
-        //save only when different (save write cycles)
-        EEPROM.writeUInt(index * 4, value);
-        EEPROM.commit();
-    }
-    Serial.println("Saved value to EEPROM: " + String(value) + " at index " + String(index));
+    setValueToEEPROM(dataPtr, index);
+    return true;
 }
 
-uint16_t Store::getMaximalIndex(){
-    return EEPROMSize / 4;
+//Get maximal index
+uint16_t Store::getMaximalIndex()
+{
+    return (EEPROMSize - (blockSize * configBlocksCount)) / blockSize;
+}
+
+//Get config
+LoggerConfig Store::getConfig(){
+    uint32_t configIndex = EEPROMSize - (configBlocksCount * blockSize);
+
+    LoggerConfigUnion *cu = new LoggerConfigUnion();
+    for (size_t i = 0; i < (configBlocksCount * blockSize); i++)
+    {
+        cu->bytes[i] = readEEPROM(configIndex + i);
+    }
+
+    Serial.println("EEPROM read at index: " + String(configIndex));
+
+    return cu->loggerConfig;
+}
+
+//Save config
+void Store::setLoggerConfig(pLoggerConfig configPtr){
+    uint32_t configIndex = EEPROMSize - (configBlocksCount * blockSize);
+
+    LoggerConfigUnion cu;
+    cu.loggerConfig = *configPtr;
+    for (size_t i = 0; i < (configBlocksCount * blockSize); i++)
+    {
+        writeEEPROM(configIndex + i, cu.bytes[i]);
+    }
+
+    Serial.println("Saved value to EEPROM: " + String(configPtr->period) + " at index " + String(configIndex));
 }

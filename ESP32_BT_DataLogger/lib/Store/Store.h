@@ -3,19 +3,26 @@
 
 #include <Arduino.h>
 #include <EEPROM.h>
+#include "LoggerData.h"
+#include "LoggerConfig.h"
 
 class Store
 {
 public:
-    uint32_t getValueFromEEPROM(uint16_t index);
-    void setValueToEEPROM(uint32_t value, uint16_t index);
-    void setValueToEEPROM(uint32_t value);
+    LoggerData getValueFromEEPROM(uint16_t index);
+    void setValueToEEPROM(pLoggerData dataPtr, uint16_t index);
+    bool setValueToEEPROM(pLoggerData dataPtr);
     void clearEEPROM();
     uint16_t getMaximalIndex();
+    LoggerConfig getConfig();
+    void setLoggerConfig(pLoggerConfig configPtr);
 
 private:
     bool isInitialized = false;
     void init();
+    void writeEEPROM(unsigned int eeaddress, byte data);
+    byte readEEPROM(unsigned int eeaddress);
+    bool isEEPROMReady();
 };
 
 #endif
