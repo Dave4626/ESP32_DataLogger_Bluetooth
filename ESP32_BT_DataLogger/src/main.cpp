@@ -9,10 +9,10 @@
 
 //Define constants
 // the pin that is connected to SQW
-#define CLOCK_INTERRUPT_PIN 2
 #define BUTTONPIN 0
-#define MYLEDPIN 13
 #define DHT11PIN 4
+#define CLOCK_INTERRUPT_PIN 33
+#define WAKE_PIN_BITMASK 0x200000000 //GPIO 33 (2^33 = 8589934592 = 0x200000000) (RTC SQW)
 
 #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
 #error Bluetooth is not enabled! Please run `make menuconfig` to and enable it
@@ -20,7 +20,6 @@
 
 //Global variables
 volatile bool bluetoothSwitch = false;
-static unsigned long last_interrupt_time = 0;
 float tempDHT = 0;
 float humiDHT = 0;
 BluetoothSerial SerialBT;
@@ -28,50 +27,85 @@ Store EEPROMStore;
 RTC_DS3231 rtc;
 DHT dht(DHT11PIN, DHT11);
 
-//debounce for button interrupt
-bool debounce()
-{
-  bool result = false;
-  unsigned long interrupt_time = millis();
-  if (interrupt_time - last_interrupt_time > 200)
-  {
-    result = true;
-  }
-  last_interrupt_time = interrupt_time;
-
-  return result;
-}
-
 //switch state
 void stateSwitch(bool state)
 {
   bluetoothSwitch = state;
-  digitalWrite(MYLEDPIN, state ? HIGH : LOW);
   digitalWrite(LED_BUILTIN, state ? HIGH : LOW);
 }
 
-//interrupt handler
-void buttonPressed()
+//Gets wake up reason
+void printWakeupReasonAndSetState()
 {
-  if (debounce())
+  esp_sleep_wakeup_cause_t wakeup_reason;
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  //set default state (logger mode)
+  stateSwitch(false);
+
+  switch (wakeup_reason)
   {
-    Serial.println("BUTTON PRESSED");
-    if (bluetoothSwitch == true)
-    {
-      stateSwitch(false);
-    }
-    else
-    {
-      stateSwitch(true);
-    }
+  case ESP_SLEEP_WAKEUP_EXT0:
+    Serial.println("Wakeup caused by external signal using RTC_IO");
+    //wake up from button
+    //Set BT state (BT Mode)
+    stateSwitch(true);
+    break;
+  case ESP_SLEEP_WAKEUP_EXT1:
+    Serial.println("Wakeup caused by external signal using RTC_CNTL");
+    //wake up from RTC
+    break;
+  case ESP_SLEEP_WAKEUP_TIMER:
+    Serial.println("Wakeup caused by timer");
+    break;
+  case ESP_SLEEP_WAKEUP_TOUCHPAD:
+    Serial.println("Wakeup caused by touchpad");
+    break;
+  case ESP_SLEEP_WAKEUP_ULP:
+    Serial.println("Wakeup caused by ULP program");
+    break;
+  default:
+    Serial.printf("Wakeup was not caused by deep sleep: %d\n", wakeup_reason);
+    //reboot
+    break;
   }
 }
 
+//debounce for button interrupt
+// bool debounce()
+// {
+//   bool result = false;
+//   unsigned long interrupt_time = millis();
+//   if (interrupt_time - last_interrupt_time > 200)
+//   {
+//     result = true;
+//   }
+//   last_interrupt_time = interrupt_time;
+//   return result;
+// }
+
+//interrupt handler
+// void buttonPressed()
+// {
+//   if (debounce())
+//   {
+//     Serial.println("BUTTON PRESSED");
+//     if (bluetoothSwitch == true)
+//     {
+//       stateSwitch(false);
+//     }
+//     else
+//     {
+//       stateSwitch(true);
+//     }
+//   }
+// }
+
 //on rtc alarm
-void onAlarm()
-{
-  Serial.println("Alarm occured!");
-}
+// void onAlarm()
+// {
+//   Serial.println("Alarm occured!");
+// }
 
 //Set next alarm after period from configuration
 void setNextAlarm()
@@ -90,20 +124,9 @@ void setNextAlarm()
   Serial.println("Alarm will happen in " + String(period * 60) + " seconds!");
 }
 
-//Setup
-void setup()
+//setup RTC and set next alarm
+void setupRtc()
 {
-  // put your setup code here, to run once:
-  Serial.begin(9600);
-  delay(1000);
-  Serial.println("START");
-  dht.begin();
-  pinMode(MYLEDPIN, OUTPUT);
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(MYLEDPIN, LOW);
-  digitalWrite(LED_BUILTIN, LOW);
-  attachInterrupt(BUTTONPIN, buttonPressed, RISING);
-
   //RTC
   if (!rtc.begin())
   {
@@ -120,8 +143,8 @@ void setup()
   //we don't need the 32K Pin, so disable it
   rtc.disable32K();
   // Making it so, that the alarm will trigger an interrupt
-  pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), onAlarm, FALLING);
+  //pinMode(CLOCK_INTERRUPT_PIN, INPUT_PULLUP);
+  //attachInterrupt(digitalPinToInterrupt(CLOCK_INTERRUPT_PIN), onAlarm, FALLING);
   // set alarm 1, 2 flag to false (so alarm 1, 2 didn't happen so far)
   // if not done, this easily leads to problems, as both register aren't reset on reboot/recompile
   rtc.clearAlarm(1);
@@ -134,6 +157,31 @@ void setup()
   rtc.disableAlarm(2);
   // schedule an alarm
   setNextAlarm();
+}
+
+//Setup
+void setup()
+{
+  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.begin(9600);
+  delay(1000);
+  Serial.println("START");
+  dht.begin();
+
+  //set default state
+  stateSwitch(false);
+
+  //Print the wakeup reason for ESP32 and set state
+  printWakeupReasonAndSetState();
+
+  //setup rtc with first/next alarm
+  setupRtc();
+
+  //setup wake up pins
+  esp_sleep_enable_ext1_wakeup(WAKE_PIN_BITMASK, ESP_EXT1_WAKEUP_ALL_LOW);
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+
+  //other is now up to loop method
 }
 
 // read data from DHT (temp a humi)
@@ -156,37 +204,30 @@ bool readDHT()
   }
 }
 
+//Turn light off and go to sleep
+void goToSleep(){
+  Serial.println("Going to sleep now");
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(500);
+  esp_deep_sleep_start();
+}
+
 //Program running when bluetooth flag is off
 void programWhenBTOff()
 {
-  Serial.println("(LOGGER MODE) Led is now OFF " + String(millis()));
-  // print current time
-  char date[10] = "hh:mm:ss";
-  rtc.now().toString(date);
-  Serial.print(date);
-  // the value at SQW-Pin (because of pullup 1 means no alarm)
-  Serial.print(" SQW: ");
-  Serial.print(digitalRead(CLOCK_INTERRUPT_PIN));
-  // whether a alarm happened happened
-  Serial.print(" Alarm1: ");
-  Serial.println(rtc.alarmFired(1));
-  // resetting SQW and alarm 1 flag
-  // using setAlarm1, the next alarm could now be configurated
-  if (rtc.alarmFired(1))
+  time_t time = rtc.now().unixtime();
+  while (!readDHT())
   {
-    time_t time = rtc.now().unixtime();
-    while (!readDHT())
-    {
-      delay(10);
-    }
-    uint16_t temp = (uint16_t)(tempDHT * 10);
-    uint16_t humi = (uint16_t)(humiDHT * 10);
-    Serial.println("Data for sensor: " + String(temp / 10.0) + "C, " + String(humi / 10.0) + "%");
-    LoggerData t = {Temperature : temp, Humidity : humi, Time : time};
-    EEPROMStore.setValueToEEPROM(&t);
-    setNextAlarm();
+    delay(10);
   }
-  delay(2000);
+  uint16_t temp = (uint16_t)(tempDHT * 10);
+  uint16_t humi = (uint16_t)(humiDHT * 10);
+  Serial.println("Data for sensor: " + String(temp / 10.0) + "C, " + String(humi / 10.0) + "%");
+  LoggerData t = {Temperature : temp, Humidity : humi, Time : time};
+  EEPROMStore.setValueToEEPROM(&t);
+  setNextAlarm();
+  delay(100);
+  goToSleep();
 }
 
 //Program running when BT is ON
@@ -270,6 +311,8 @@ void programWhenBTOn()
 
   delay(500);
   SerialBT.end();
+
+  stateSwitch(false);
 }
 
 //Loop
