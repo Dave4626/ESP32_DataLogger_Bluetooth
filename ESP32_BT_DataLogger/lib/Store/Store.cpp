@@ -213,5 +213,5 @@ void Store::setLoggerConfig(pLoggerConfig configPtr){
         writeEEPROM(configIndex + i, cu.bytes[i]);
     }
 
-    Serial.println("Saved value to EEPROM: " + String(configPtr->period) + " at index " + String(configIndex));
+    Serial.println("Saved value to EEPROM: " + String(configPtr->periodMinutes) + " minutes at index " + String(configIndex));
 }
