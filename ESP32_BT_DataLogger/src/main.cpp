@@ -344,9 +344,9 @@ void programWhenBTOn()
       }
       else if (s.startsWith("time")) //ADJUST TIME
       {
-        SerialBT.println("INFO: Set time start...");
         //expected time:yyyy-MM-DDTHH:mm:ss
-        String timeIsoStr = s.substring(5);
+        String timeIsoStr = s.substring(5, 24);
+        SerialBT.println("INFO: Set time to " + timeIsoStr);
         rtc.adjust(DateTime(timeIsoStr.c_str()));
         SerialBT.println("INFO: Time is adjusted now to: " + rtc.now().timestamp());
         //sentMessage = false;
@@ -361,6 +361,8 @@ void programWhenBTOn()
         SerialBT.println("\"clear\" to clear memory or \"end\" to disconnect");
         SerialBT.println("\"time:yyyy-MM-DDTHH:mm:ss\" to set time");
         SerialBT.println("\"end\" to disconnect and continue in logging");
+        LoggerConfig cfg = EEPROMStore.getConfig();
+        SerialBT.println("Alarm config " + String(cfg.startHour) + ":" + String(cfg.startMinute) + " period [min] " + String(cfg.periodMinutes));
         SerialBT.println("RTC Time is " + rtc.now().timestamp());
       }
       else if (s.startsWith("end")) //END
