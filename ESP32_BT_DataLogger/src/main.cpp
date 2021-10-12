@@ -126,15 +126,16 @@ void setNextAlarm()
   //find next alarm time
   //first create copy of now with alarmStart hour and minute
   DateTime dt = DateTime(rtc.now().year(), rtc.now().month(), rtc.now().day(), config.startHour, config.startMinute, 0);
+  DateTime current = rtc.now();
   //then go back to past
-  while (dt > rtc.now())
+  while (dt >= current)
   {
     dt = dt - TimeSpan(periodSec);
   }
   //for sure one more period back
   dt = dt - TimeSpan(periodSec);
   //now add period until alarm will be in future
-  while (dt < rtc.now())
+  while (dt < current)
   {
     dt = dt + TimeSpan(periodSec);
   }
@@ -260,7 +261,8 @@ void programWhenBTOff()
     LoggerData t = {Temperature : temp, Humidity : humi, Time : time};
     EEPROMStore.setValueToEEPROM(&t);
   }
-  else{
+  else
+  {
     Serial.println("Woke up, but not by RTC (no logging)");
   }
   //Set alarm and go to sleep
@@ -282,12 +284,7 @@ void programWhenBTOn()
     if (!sentMessage && SerialBT.connected())
     {
       SerialBT.println("ESP32 DATALOGGER BT");
-      SerialBT.println("List of commands:");
-      SerialBT.println("\"read\" to start reading\n");
-      SerialBT.println("\"config:HH:MM:period\" where HH and MM is reference hour and minute, period is logging period [minutes]\n");
-      SerialBT.println("(note config:12-15-360 means meassure each 6hours at: 12:15, 18:15, 00:15, 06:15, 12:15 etc)\n");
-      SerialBT.println("\"clear\" to clear memory or \"end\" to disconnect\n");
-      SerialBT.println("\"end\" to disconnect and continue in logging\n");
+      SerialBT.println("List of commands: \"help\", \"read\", \"config:HH:MM:period\", \"time:yyyy-MM-DDTHH:mm:ss\", \"clear\", \"end\"");
       sentMessage = true;
     }
 
@@ -335,7 +332,7 @@ void programWhenBTOn()
         {
           LoggerConfig conf = {startHour : hh, startMinute : mm, periodMinutes : periodMin, _reserved : 0};
           EEPROMStore.setLoggerConfig(&conf);
-          SerialBT.println("INFO: Configuration saved. Will be used for next loop or after reboot.");
+          SerialBT.println("INFO: Configuration saved.");
         }
         else
         {
@@ -349,6 +346,27 @@ void programWhenBTOn()
         EEPROMStore.clearEEPROM();
         SerialBT.println("INFO: Memory is cleared.");
         //sentMessage = false;
+      }
+      else if (s.startsWith("time")) //ADJUST TIME
+      {
+        SerialBT.println("INFO: Set time start...");
+        //expected time:yyyy-MM-DDTHH:mm:ss
+        String timeIsoStr = s.substring(5);
+        rtc.adjust(DateTime(timeIsoStr.c_str()));
+        SerialBT.println("INFO: Time is adjusted now to: " + rtc.now().timestamp());
+        //sentMessage = false;
+      }
+      else if (s.startsWith("help")) //HELP
+      {
+        SerialBT.println("List of commands: \"help\", \"read\", \"config:HH:MM:period\", \"time:yyyy-MM-DDTHH:mm:ss\", \"clear\", \"end\"");
+        SerialBT.println("\"help\" to see this :-)");
+        SerialBT.println("\"read\" to start reading");
+        SerialBT.println("\"config:HH:MM:period\" where HH and MM is reference hour and minute, period is logging period [minutes]");
+        SerialBT.println("(note config:12-15-360 means meassure each 6hours at: 12:15, 18:15, 00:15, 06:15, 12:15 etc)");
+        SerialBT.println("\"clear\" to clear memory or \"end\" to disconnect");
+        SerialBT.println("\"time:yyyy-MM-DDTHH:mm:ss\" to set time");
+        SerialBT.println("\"end\" to disconnect and continue in logging");
+        SerialBT.println("RTC Time is " + rtc.now().timestamp());
       }
       else if (s.startsWith("end")) //END
       {
