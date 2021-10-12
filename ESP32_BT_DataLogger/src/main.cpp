@@ -9,7 +9,7 @@
 
 //Define constants
 // the pin that is connected to SQW
-#define BUTTONPIN 0
+#define BUTTONPIN GPIO_NUM_13
 #define DHT11PIN 4
 #define CLOCK_INTERRUPT_PIN 33
 #define WAKE_PIN_BITMASK 0x200000000 //GPIO 33 (2^33 = 8589934592 = 0x200000000) (RTC SQW)
@@ -20,6 +20,7 @@
 
 //Global variables
 volatile bool bluetoothSwitch = false;
+static unsigned long last_interrupt_time = 0;
 float tempDHT = 0;
 float humiDHT = 0;
 BluetoothSerial SerialBT;
@@ -71,35 +72,36 @@ void printWakeupReasonAndSetState()
   }
 }
 
-//debounce for button interrupt
-// bool debounce()
-// {
-//   bool result = false;
-//   unsigned long interrupt_time = millis();
-//   if (interrupt_time - last_interrupt_time > 200)
-//   {
-//     result = true;
-//   }
-//   last_interrupt_time = interrupt_time;
-//   return result;
-// }
+//debounce for button interrupt (only when in BT mode to EXIT from it)
+bool debounce()
+{
+  bool result = false;
+  unsigned long interrupt_time = millis();
+  if (interrupt_time - last_interrupt_time > 200)
+  {
+    result = true;
+  }
+  last_interrupt_time = interrupt_time;
+  return result;
+}
 
-//interrupt handler
-// void buttonPressed()
-// {
-//   if (debounce())
-//   {
-//     Serial.println("BUTTON PRESSED");
-//     if (bluetoothSwitch == true)
-//     {
-//       stateSwitch(false);
-//     }
-//     else
-//     {
-//       stateSwitch(true);
-//     }
-//   }
-// }
+//interrupt handler (only when in BT mode to EXIT from it)
+void buttonPressed()
+{
+  if (debounce())
+  {
+    Serial.println("BUTTON PRESSED");
+    detachInterrupt(BUTTONPIN);
+    if (bluetoothSwitch == true)
+    {
+      stateSwitch(false);
+    }
+    else
+    {
+      stateSwitch(true);
+    }
+  }
+}
 
 //on rtc alarm
 // void onAlarm()
@@ -162,14 +164,15 @@ void setupRtc()
 //Setup
 void setup()
 {
-  pinMode(LED_BUILTIN, OUTPUT);
+  //Serial begin
   Serial.begin(9600);
-  delay(1000);
+  delay(2000);
+  
   Serial.println("START");
-  dht.begin();
+  pinMode(LED_BUILTIN, OUTPUT);
 
-  //set default state
-  stateSwitch(false);
+  //DHT init
+  dht.begin();
 
   //Print the wakeup reason for ESP32 and set state
   printWakeupReasonAndSetState();
@@ -179,9 +182,12 @@ void setup()
 
   //setup wake up pins
   esp_sleep_enable_ext1_wakeup(WAKE_PIN_BITMASK, ESP_EXT1_WAKEUP_ALL_LOW);
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+  esp_sleep_enable_ext0_wakeup(BUTTONPIN, 1);
 
   //other is now up to loop method
+  if (bluetoothSwitch == true){
+    attachInterrupt(BUTTONPIN, buttonPressed, RISING);
+  }
 }
 
 // read data from DHT (temp a humi)
