@@ -1,5 +1,5 @@
 # ESP32 DataLogger with Bluetooth
-This project is simple data logger (periodiccaly log temperature and humidity to ext EEPROM). Logger is also ready to connect to your mobile phone via Bluetooth and print the stored data/be configured.
+This project is simple data logger (periodiccaly log temperature and humidity to ext EEPROM). Logger is also ready to connect to your mobile phone via Bluetooth and print the stored data/or be configured etc.
 
 ## Logical Diagram
 ![esp data logger diagram](/media/DataLogger-dark.png)
@@ -28,4 +28,5 @@ Instructions can be:
 - **read** for start reading stored data
 - **clear** for clear the EEPROM
 - etc...
+
 It can be also configured via BT (config is stored in EEPROM same as data). As soon as it receives the "read" instruction, it starts sending measured values via BT. 
