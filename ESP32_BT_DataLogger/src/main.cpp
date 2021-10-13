@@ -5,7 +5,7 @@
 #include "LoggerConfig.h"
 #include <Wire.h>
 #include <RTClib.h>
-#include "DHT.h"
+#include <DHT.h>
 
 //Define constants
 // the pin that is connected to SQW
@@ -212,8 +212,8 @@ void setup()
 // read data from DHT (temp a humi)
 bool readDHT()
 {
-  tempDHT = 0;
-  humiDHT = 0;
+  tempDHT = -1;
+  humiDHT = -1;
   float temp = dht.readTemperature();
   float humi = dht.readHumidity();
   if (isnan(temp) || isnan(humi))
@@ -227,6 +227,27 @@ bool readDHT()
     Serial.println("DHT: " + String(temp) + "C " + String(humi) + "%");
     return true;
   }
+}
+
+//read dht data x times and make average
+bool readDHTAverage(uint8_t times = 3){
+  float temp = 0;
+  float humi = 0;
+  uint8_t cnt = 0;
+  while (cnt < times)
+  {
+    if (!readDHT()){
+      return false;
+    }
+    temp += tempDHT;
+    humi += humiDHT;
+    cnt++;
+
+    delay(2000); //DHT11 minimum interval between reads
+  }
+  tempDHT = temp / (float)times;
+  humiDHT = humi / (float)times;
+  return true;
 }
 
 //Turn light off and go to sleep
@@ -246,7 +267,7 @@ void programWhenBTOff()
   {
     //read and log data
     time_t time = rtc.now().unixtime();
-    while (!readDHT())
+    while (!readDHTAverage())
     {
       delay(10);
     }
@@ -364,6 +385,15 @@ void programWhenBTOn()
         LoggerConfig cfg = EEPROMStore.getConfig();
         SerialBT.println("Alarm config " + String(cfg.startHour) + ":" + String(cfg.startMinute) + " period [min] " + String(cfg.periodMinutes));
         SerialBT.println("RTC Time is " + rtc.now().timestamp());
+        while (!readDHT()){
+          delay(20);
+        }
+        SerialBT.println("First read Temperature: " + String(tempDHT) + " Humidity: " + String(humiDHT));
+        SerialBT.println("Reading average temp, please wait...");
+        while (!readDHTAverage()){
+          delay(20);
+        }
+        SerialBT.println("Average (currently used) Temperature: " + String(tempDHT) + " Humidity: " + String(humiDHT));
       }
       else if (s.startsWith("end")) //END
       {
