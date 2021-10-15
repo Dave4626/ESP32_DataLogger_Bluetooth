@@ -9,7 +9,7 @@ String GetLoggerDataAsString(pLoggerData data)
     sprintf(buffer, "%02d.%02d.%04d %02d:%02d:%02d", d.day(), d.month(), d.year(), d.hour(), d.minute(), d.second());
     
     return "Temperature;" + String(data->Temperature / 10.0) +
-           ";[°C];Humidity;" + String(data->Humidity / 10.0) +
+           ";[C];Humidity;" + String(data->Humidity / 10.0) +
            ";[%];Date;" + String(buffer);
 }
 

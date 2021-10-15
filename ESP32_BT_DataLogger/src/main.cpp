@@ -342,7 +342,7 @@ void programWhenBTOn()
         //convert strings to integers
         uint8_t hh = (uint8_t)strtol(split[0].c_str(), NULL, 10);
         uint8_t mm = (uint8_t)strtol(split[1].c_str(), NULL, 10);
-        uint16_t periodMin = (uint8_t)strtol(split[2].c_str(), NULL, 10);
+        uint16_t periodMin = (uint16_t)strtol(split[2].c_str(), NULL, 10);
         //check and save
         if (i == 3 && periodMin > 0)
         {
