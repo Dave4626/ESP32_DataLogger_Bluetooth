@@ -1,0 +1,369 @@
+Aaa
+
+<html>
+
+    <head>
+        <meta name="viewport" content="width=device-width">
+        <script src="file:///android_asset/app.js"></script>
+    </head>
+
+    <script>
+        const deviceName = "ESP32_DATALOGGER_BT";
+        var logs = [];
+        var lastCmd = undefined;
+        const commandTypes = {
+            READ: "read",
+            END: "end",
+            CLEAR: "clear",
+            CONFIG: "config",
+            TIME: "time",
+            HELP: "help"
+        }
+
+        function onStart(){
+            bt = app.CreateBluetoothSerial();
+            bt.SetOnConnect(onConnect);
+            bt.SetOnReceive(onReceive);
+            bt.SetOnDisconnect(onDisconnect);
+            bt.SetSplitMode( "End", "\n" );
+        }
+
+        //button handlers
+        function btn_connect() {
+            if (!isConnected())
+                connect();
+            else
+                bt.Disconnect();
+        }
+
+        function btn_info() {
+            var cmd = createCommand(commandTypes.HELP);
+            sendCmd(cmd);
+        }
+
+        function btn_time() {
+            var cmd = createCommand(commandTypes.TIME);
+            sendCmd(cmd);
+        }
+
+        function btn_read() {
+            var cmd = createCommand(commandTypes.READ);
+            sendCmd(cmd);
+        }
+
+        function btn_save() {
+            var data = [];
+            var str = "";
+            if (logs && logs.length > 0) {
+                for (let i = 0; i < logs.length; i++) {
+                    const log = logs[i];
+
+                    if (log.fromDevice === true &&
+                        log.cmd && log.cmd.cmd === commandTypes.READ &&
+                        log.message) {
+
+                        if (!data.includes(log.message))
+                            data.push(log.message);
+                            str += log.message + "\r\n";
+                    }
+                }
+            }
+
+            if (!(data.length > 0)) {
+                showPopUp("Žádná data. Je potřeba nejdřív data načíst.");
+            } else {
+                var fn = "/sdcard/log" + getDate().toISOString() + ".txt";
+                app.WriteFile( fn, str, "Append", "UTF-8" );
+                var exists = app.FileExists(fn );
+                showPopUp(fn + " " + exists);
+            }
+        }
+
+
+        function btn_clear() {
+            var cmd = createCommand(commandTypes.CLEAR);
+            sendCmd(cmd);
+        }
+
+        function btn_end() {
+            var cmd = createCommand(commandTypes.END);
+            sendCmd(cmd);
+        }
+
+        function btn_config() {
+            var refTime = document.querySelector("#alarmTime").value;
+            var period = document.querySelector("#alarmPeriod").value;
+            var cmd = createCommand(commandTypes.CONFIG, refTime, period);
+            sendCmd(cmd);
+        }
+
+        function btn_clearLog() {
+            clearLog();
+        }
+
+        function showPopUp(message) {
+            app.ShowPopup(message);
+        }
+
+        function connect() {
+            if (!bt.IsBluetoothEnabled())
+                showPopUp("Není zapnutý bluetooth");
+            else
+                bt.Connect(deviceName);
+        }
+
+        function onConnect(ok) {
+            if (!ok) {
+                showPopUp("Nelze se připojit, zkus to znovu");
+                document.querySelector("#btnConnect").innerHTML = "Připoj se";
+            } else {
+                document.querySelector("#connectionState").innerHTML = "Připojeno";
+                document.querySelector("#connectionState").className = "success";
+                document.querySelector("#btnConnect").innerHTML = "Odpoj se";
+            }
+        }
+
+        function onDisconnect() {
+            document.querySelector("#connectionState").innerHTML = "Nepřipojeno";
+            document.querySelector("#connectionState").className = "danger";
+            document.querySelector("#btnConnect").innerHTML = "Připoj se";
+        }
+
+        function onReceive(data) {
+            addToLog(data, true);
+        }
+
+        function isConnected() {
+            return bt.IsConnected();
+        }
+
+        function sendCmd(cmd) {
+            if (isConnected()) {
+                bt.Write(cmd.cmd + "\n");
+                lastCmd = cmd;
+                addToLog(cmd.cmd, false);
+            } else {
+                showPopUp("Nejdřív se připoj");
+            }
+        }
+
+        function addToLog(message, fromDevice = false) {
+            var data = {
+                fromDevice: fromDevice,
+                message: message,
+                date: getDate(),
+                cmd: lastCmd
+            };
+            logs.push(data);
+            var htmlItem = createLogHtmlItem(data);
+            var container = document.querySelector("#logs");
+            container.innerHTML += htmlItem;
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLog() {
+            logs = [];
+            document.querySelector("#logs").innerHTML = "";
+        }
+
+        function createLogHtmlItem(log) {
+            var item = "<li><h4>" +
+                (log.fromDevice === true ? "(logger)" : "(mobil)") +
+                ((getDate()).toISOString()) +
+                "</h4><p>" + log.message + "</p></li>";
+            return item;
+        }
+
+        //Create command string
+        function createCommand(cmdType, alarmReferenceTime, alarmPeriod) {
+            switch (cmdType) {
+                case commandTypes.CLEAR:
+                    return {
+                        type: cmdType,
+                        cmd: "clear"
+                    };
+                case commandTypes.CONFIG:
+                    return {
+                        type: cmdType,
+                        cmd: "config:" + alarmReferenceTime + ":" + alarmPeriod
+                    };
+                case commandTypes.END:
+                    return {
+                        type: cmdType,
+                        cmd: "end"
+                    };
+                case commandTypes.HELP:
+                    return {
+                        type: cmdType,
+                        cmd: "help"
+                    };
+                case commandTypes.READ:
+                    return {
+                        type: cmdType,
+                        cmd: "read"
+                    };
+                case commandTypes.TIME:
+                    var ds = (getDate()).toISOString();
+                    return {
+                        type: cmdType,
+                        cmd: "time:" + ds.substr(0, ds.length - 5)
+                    };
+                default:
+                    return undefined;
+            }
+        }
+
+        function getDate(){
+            var date = new Date();
+            var plus = document.querySelector("#timePlus").value;
+            date.setTime(date.getTime() + (Number(plus) * 60 * 60 * 1000));
+            return date;
+        }
+    
+    </script>
+
+    <style>
+        body {
+            background: rgb(14, 22, 29);
+            color: rgb(231, 235, 238);
+            font-family: Verdana, Geneva, Tahoma, sans-serif;
+            padding: 2%;
+        }
+        
+        .logsContainer {
+            background-color: rgb(14, 116, 19);
+            border-radius: 10px;
+        }
+        
+        .logs {
+            list-style: none;
+            padding: 0;
+            overflow: scroll;
+            white-space: nowrap;
+            width: 100%;
+            height: 60%;
+            max-height: 60%;
+        }
+        
+        .logs>li {
+            margin: 0 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid gray;
+        }
+        
+        .logs>li>h4 {
+            margin: 0;
+            font-size: 0.6em;
+            color: rgb(202, 202, 202);
+        }
+        
+        .logs>li>p {
+            margin: 0;
+            padding: 0;
+            font-weight: bold;
+            font-size: 0.8em;
+        }
+        
+        button {
+            border-radius: 5px;
+            padding: 5px;
+            background-color: rgb(12, 72, 112);
+            color: white;
+            width: 48%;
+            min-height: 60px;
+            font-weight: bold;
+        }
+        
+        .d-inline-block-w6 {
+            width: 60%;
+            display: inline-block;
+        }
+        
+        .d-inline-block-w3 {
+            width: 30%;
+            display: inline-block;
+        }
+        
+        input {
+            width: 100%;
+            min-height: 30px;
+            margin-bottom: 10px;
+        }
+        
+        .bg-danger {
+            background-color: rgb(192, 48, 48);
+        }
+        
+        .danger {
+            color: rgb(201, 44, 44);
+        }
+        
+        .success {
+            color: rgb(39, 128, 51);
+        }
+        
+        .btn-group {
+            padding-bottom: 20px;
+        }
+    </style>
+
+    <body onload="app.Start(); onStart();">
+
+        <div>
+            <div class="d-inline-block-w6">
+                <h3>Data Logger
+                    <small id="connectionState" class="danger">Nepřipojeno</small>
+                </h3>
+            </div>
+            <div class="d-inline-block-w3">
+                <button id="btnConnect" onclick="btn_connect();" style="float: right; width: 100%;">Připoj se</button>
+            </div>
+        </div>
+
+        <div class="logsContainer">
+            <ul id="logs" class="logs">
+            </ul>
+        </div>
+
+        <div>
+            <h3>Příkazy</h3>
+            <div class="btn-group">
+                <button onclick="btn_info();">Info</button>
+                <button onclick="btn_time();">Nastav čas</button>
+            </div>
+            <div class="btn-group">
+                <button onclick="btn_read();">Přečti data</button>
+                <button onclick="btn_save();">Uložit data</button>
+            </div>
+            <div class="btn-group">
+                <button onclick="btn_clear();" class="bg-danger">Vymaž paměť</button>
+                <button onclick="btn_end();">Ukončit</button>
+            </div>
+
+
+
+            <h3>Nastavení periody měření</h3>
+            <div>
+                <label for="alarmTime">Referenční čas</label>
+                <input type="text" id="alarmTime" name="alarmTime" value="12:00">
+            </div>
+            <div>
+                <label for="alarmPeriod">Perioda měření [minut]</label>
+                <input type="text" id="alarmPeriod" name="alarmPeriod" value="60">
+            </div>
+            <button onclick="btn_config();">Nastav periodu</button>
+
+            <h3>Ostatní</h3>
+            <button onclick="btn_clearLog();">Vymaž log</button>
+
+            <div>
+                <br/>
+                <label for="timePlus">Časová zóna GMT+</label>
+                <input type="text" id="timePlus" name="timePlus" value="2">
+            </div>
+
+        </div>
+    </body>
+
+</html>

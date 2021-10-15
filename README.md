@@ -31,10 +31,11 @@ Instructions can be:
 
 It can be also configured via BT (config is stored in EEPROM same as data). As soon as it receives the "read" instruction, it starts sending measured values via BT. 
 
+## Mobila app
+In this repo is also simple mobile app created with droidscript, but can be used also eg. Serial Bluetooth Terminal by Kai Morich
 
-## Wiring Diagram
-Attention! This is not an exact wiring diagram for this code, but rather a sample of the components used.
 
-> For your specific wiring, you can use the partial instructions for the individual components (RTC, DHT) and after just change the pin numbers in the code. 
+## Final product
+:-)
 
-![esp data logger diagram](/media/WiringDiagram.JPG)
+![photo of final product](/media/box.jpg)
