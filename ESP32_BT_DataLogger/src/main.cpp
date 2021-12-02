@@ -3,9 +3,10 @@
 #include "Store.h"
 #include "LoggerData.h"
 #include "LoggerConfig.h"
+#include <Adafruit_AHTX0.h>
 #include <Wire.h>
 #include <RTClib.h>
-#include <DHT.h>
+
 
 //Define constants
 // the pin that is connected to SQW
@@ -27,7 +28,8 @@ float humiDHT = 0;
 BluetoothSerial SerialBT;
 Store EEPROMStore;
 RTC_DS3231 rtc;
-DHT dht(DHT11PIN, DHT11);
+TwoWire wire = TwoWire(5);
+Adafruit_AHTX0 aht;
 
 //switch state
 void stateSwitch(bool state)
@@ -189,8 +191,15 @@ void setup()
   Serial.println("START");
   pinMode(LED_BUILTIN, OUTPUT);
 
-  //DHT init
-  dht.begin();
+  //Thermometer init
+  while (!wire.begin(GPIO_NUM_4, GPIO_NUM_5)){
+    Serial.println("Wire cannot begin");
+    delay(2000);
+  }
+  while (!aht.begin(&wire)) {
+    Serial.println("Could not find AHT? Check wiring");
+    delay(2000);
+  }
 
   //Print the wakeup reason for ESP32 and set state
   printWakeupReasonAndSetState();
@@ -214,8 +223,10 @@ bool readDHT()
 {
   tempDHT = -1;
   humiDHT = -1;
-  float temp = dht.readTemperature();
-  float humi = dht.readHumidity();
+  sensors_event_t humidity, temperature;
+  aht.getEvent(&humidity, &temperature);
+  float temp = temperature.temperature;
+  float humi = humidity.relative_humidity;
   if (isnan(temp) || isnan(humi))
   {
     return false;
@@ -224,7 +235,7 @@ bool readDHT()
   {
     tempDHT = temp;
     humiDHT = humi;
-    Serial.println("DHT: " + String(temp) + "C " + String(humi) + "%");
+    Serial.println("Thermometer: " + String(temp) + "C " + String(humi) + "%");
     return true;
   }
 }
@@ -243,7 +254,7 @@ bool readDHTAverage(uint8_t times = 3){
     humi += humiDHT;
     cnt++;
 
-    delay(2000); //DHT11 minimum interval between reads
+    delay(500);
   }
   tempDHT = temp / (float)times;
   humiDHT = humi / (float)times;
